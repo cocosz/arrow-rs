@@ -185,10 +185,10 @@ for CFG in "${CONFIGS[@]}"; do
             2>&1 | grep -E "^(Bloom|Wrote)" | sed 's/^/      /'
 
         # ── Verify bloom filter lengths match expected NDV/FPP
-        "$VERIFY_BIN" --verify --ndv "$NDV" --fpp "$FPP" "$DEST" 2>&1 \
-            | grep -E "(OK|MISMATCH|PASSED|FAILED)" | sed 's/^/      /'
-        if "$VERIFY_BIN" --verify --ndv "$NDV" --fpp "$FPP" "$DEST" \
-                2>&1 | grep -q "FAILED"; then
+        # Run once, capture output + exit code. set -e is bypassed by `|| true`.
+        VERIFY_OUT=$("$VERIFY_BIN" --verify --ndv "$NDV" --fpp "$FPP" "$DEST" 2>&1) || true
+        echo "$VERIFY_OUT" | grep -E "(OK|MISMATCH|PASSED|FAILED)" | sed 's/^/      /'
+        if echo "$VERIFY_OUT" | grep -q "FAILED"; then
             die "Bloom filter verification failed for $DEST"
         fi
     done
