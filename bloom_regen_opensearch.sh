@@ -123,6 +123,7 @@ for CFG in "${CONFIGS[@]}"; do
 
     # ── 5a. Mirror full source tree: hard-link everything except clickbench parquets
     log "  Mirroring source tree (hard-links for all non-parquet + other indices)…"
+    mkdir -p "$CONFIG_ROOT"
     if command -v rsync &>/dev/null; then
         # Hard-link all files; exclude only the clickbench parquet files — we'll
         # write those ourselves below.
