@@ -70,7 +70,8 @@ if [[ ! -d "$REPO_DIR" ]]; then
         https://github.com/cocosz/arrow-rs.git "$REPO_DIR"
 else
     log "Repo already at $REPO_DIR"
-    git -C "$REPO_DIR" pull --ff-only 2>/dev/null || log "  (pull skipped)"
+    git -C "$REPO_DIR" fetch origin
+    git -C "$REPO_DIR" reset --hard origin/bloom-rewrite-tool
 fi
 
 # ── 3. Build binary ───────────────────────────────────────────────────────────
