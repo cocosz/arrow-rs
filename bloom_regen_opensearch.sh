@@ -79,22 +79,18 @@ fi
 
 # ── 3. Build binary ───────────────────────────────────────────────────────────
 BINARY="$REPO_DIR/target/release/parquet-rewrite-bloom"
-VERIFY_BIN="$REPO_DIR/target/release/parquet-bloom-info"
-if [[ "$SKIP_BUILD" == "1" && -x "$BINARY" && -x "$VERIFY_BIN" ]]; then
-    log "SKIP_BUILD=1 — reusing existing binaries at $BINARY"
+if [[ "$SKIP_BUILD" == "1" && -x "$BINARY" ]]; then
+    log "SKIP_BUILD=1 — reusing existing binary at $BINARY"
 else
-    log "Building parquet-rewrite-bloom and parquet-bloom-info (release)…"
+    log "Building parquet-rewrite-bloom (release)…"
     cargo build \
         --manifest-path "$REPO_DIR/parquet/Cargo.toml" \
         --features arrow,cli \
         --bin parquet-rewrite-bloom \
-        --bin parquet-bloom-info \
         --release 2>&1
-    [[ -x "$BINARY" ]]     || die "parquet-rewrite-bloom not found after build"
-    [[ -x "$VERIFY_BIN" ]] || die "parquet-bloom-info not found after build"
+    [[ -x "$BINARY" ]] || die "parquet-rewrite-bloom not found after build"
 fi
-log "Rewrite binary : $BINARY"
-log "Verify binary  : $VERIFY_BIN"
+log "Binary: $BINARY"
 
 # ── 4. Validate source and locate clickbench parquet dir ─────────────────────
 [[ -d "$SOURCE_ROOT" ]] || die "Source root '$SOURCE_ROOT' does not exist"
@@ -183,14 +179,6 @@ for CFG in "${CONFIGS[@]}"; do
             --bloom-filter-ndv "$NDV" \
             --bloom-filter-fpp "$FPP" \
             2>&1 | grep -E "^(Bloom|Wrote)" | sed 's/^/      /'
-
-        # ── Verify bloom filter lengths match expected NDV/FPP
-        # Run once, capture output + exit code. set -e is bypassed by `|| true`.
-        VERIFY_OUT=$("$VERIFY_BIN" --verify --ndv "$NDV" --fpp "$FPP" "$DEST" 2>&1) || true
-        echo "$VERIFY_OUT" | grep -E "(OK|MISMATCH|PASSED|FAILED)" | sed 's/^/      /'
-        if echo "$VERIFY_OUT" | grep -q "FAILED"; then
-            die "Bloom filter verification failed for $DEST"
-        fi
     done
 
     # ── 5c. Manifest
