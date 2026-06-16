@@ -27,7 +27,10 @@ set -euo pipefail
 
 # ── NDV / FPP matrix ──────────────────────────────────────────────────────────
 CONFIGS=(
+    "100000  0.2"
     "100000  0.1"
+    "100000  0.05"
+    "100000  0.01"
     "500000  0.2"
     "500000  0.1"
     "500000  0.05"
@@ -76,18 +79,22 @@ fi
 
 # ── 3. Build binary ───────────────────────────────────────────────────────────
 BINARY="$REPO_DIR/target/release/parquet-rewrite-bloom"
-if [[ "$SKIP_BUILD" == "1" && -x "$BINARY" ]]; then
-    log "SKIP_BUILD=1 — reusing existing binary at $BINARY"
+VERIFY_BIN="$REPO_DIR/target/release/parquet-bloom-info"
+if [[ "$SKIP_BUILD" == "1" && -x "$BINARY" && -x "$VERIFY_BIN" ]]; then
+    log "SKIP_BUILD=1 — reusing existing binaries at $BINARY"
 else
-    log "Building parquet-rewrite-bloom (release)…"
+    log "Building parquet-rewrite-bloom and parquet-bloom-info (release)…"
     cargo build \
         --manifest-path "$REPO_DIR/parquet/Cargo.toml" \
         --features arrow,cli \
         --bin parquet-rewrite-bloom \
+        --bin parquet-bloom-info \
         --release 2>&1
-    [[ -x "$BINARY" ]] || die "Binary not found at $BINARY after build"
+    [[ -x "$BINARY" ]]     || die "parquet-rewrite-bloom not found after build"
+    [[ -x "$VERIFY_BIN" ]] || die "parquet-bloom-info not found after build"
 fi
-log "Binary: $BINARY"
+log "Rewrite binary : $BINARY"
+log "Verify binary  : $VERIFY_BIN"
 
 # ── 4. Validate source and locate clickbench parquet dir ─────────────────────
 [[ -d "$SOURCE_ROOT" ]] || die "Source root '$SOURCE_ROOT' does not exist"
@@ -122,6 +129,19 @@ for CFG in "${CONFIGS[@]}"; do
     log ""
     log "[$IDX/$TOTAL] NDV=$NDV  FPP=$FPP  →  $CONFIG_ROOT"
 
+    # ── Skip entire config if already fully generated ─────────────────────────
+    DEST_PARQUET_DIR="$CONFIG_ROOT/nodes/0/indices/$CLICKBENCH_UUID/0/parquet"
+    MANIFEST="$CONFIG_ROOT/bloom_config.txt"
+    if [[ -f "$MANIFEST" ]]; then
+        EXISTING=$(find "$DEST_PARQUET_DIR" -maxdepth 1 -name "*.parquet" 2>/dev/null | wc -l | tr -d ' ')
+        if [[ "$EXISTING" -eq "${#SRC_FILES[@]}" ]]; then
+            log "  Already complete ($EXISTING/${#SRC_FILES[@]} files) — skipping"
+            continue
+        else
+            log "  Partially complete ($EXISTING/${#SRC_FILES[@]} files) — resuming"
+        fi
+    fi
+
     # ── 5a. Mirror full source tree: hard-link everything except clickbench parquets
     log "  Mirroring source tree (hard-links for all non-parquet + other indices)…"
     mkdir -p "$CONFIG_ROOT"
@@ -141,7 +161,6 @@ for CFG in "${CONFIGS[@]}"; do
     fi
 
     # Ensure destination parquet dir exists (rsync with --exclude may skip it)
-    DEST_PARQUET_DIR="$CONFIG_ROOT/nodes/0/indices/$CLICKBENCH_UUID/0/parquet"
     mkdir -p "$DEST_PARQUET_DIR"
 
     # ── 5b. Rewrite each clickbench parquet file
@@ -164,6 +183,14 @@ for CFG in "${CONFIGS[@]}"; do
             --bloom-filter-ndv "$NDV" \
             --bloom-filter-fpp "$FPP" \
             2>&1 | grep -E "^(Bloom|Wrote)" | sed 's/^/      /'
+
+        # ── Verify bloom filter lengths match expected NDV/FPP
+        "$VERIFY_BIN" --verify --ndv "$NDV" --fpp "$FPP" "$DEST" 2>&1 \
+            | grep -E "(OK|MISMATCH|PASSED|FAILED)" | sed 's/^/      /'
+        if "$VERIFY_BIN" --verify --ndv "$NDV" --fpp "$FPP" "$DEST" \
+                2>&1 | grep -q "FAILED"; then
+            die "Bloom filter verification failed for $DEST"
+        fi
     done
 
     # ── 5c. Manifest
